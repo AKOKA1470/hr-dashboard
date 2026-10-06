@@ -10,7 +10,8 @@ import {
   BriefcaseBusiness,
   Clock3,
   ChevronDown,
-  Check
+  Check,
+  X,
 } from "lucide-react";
 import {
   Area,
@@ -207,12 +208,12 @@ const hiringFunnel = [
   { name: "Joined", value: 36, color: "#22c55e" },
 ];
 
-const leaveRequests = [
-  { employee: "Ananya Rao", department: "Technology", type: "Earned leave", dates: "25–27 Sep", days: 3, status: "Pending" },
-  { employee: "Rohan Mehta", department: "Creative", type: "Sick leave", dates: "24 Sep", days: 1, status: "Approved" },
-  { employee: "Nisha Thomas", department: "Finance", type: "Casual leave", dates: "30 Sep", days: 1, status: "Pending" },
-  { employee: "Vikram Singh", department: "Operations", type: "Earned leave", dates: "2–4 Oct", days: 3, status: "Approved" },
-  { employee: "Sara Khan", department: "HR", type: "Casual leave", dates: "26 Sep", days: 1, status: "Rejected" },
+const demoLeaveRequests = [
+  { employee: "Sample Employee 1", department: "Technology", type: "Earned leave", dates: "25–27 Sep", days: 3, status: "Pending" },
+  { employee: "Sample Employee 2", department: "Creative", type: "Sick leave", dates: "24 Sep", days: 1, status: "Approved" },
+  { employee: "Sample Employee 3", department: "Finance", type: "Casual leave", dates: "30 Sep", days: 1, status: "Pending" },
+  { employee: "Sample Employee 4", department: "Operations", type: "Earned leave", dates: "2–4 Oct", days: 3, status: "Approved" },
+  { employee: "Sample Employee 5", department: "HR", type: "Casual leave", dates: "26 Sep", days: 1, status: "Rejected" },
 ];
 
 const statusStyles = {
@@ -242,18 +243,29 @@ function KpiCard({ title, value, detail, icon: Icon, accent }) {
   );
 }
 
-export default function HRDashboard() {
+export default function HRDashboard({ onSignIn }: { onSignIn: () => void }) {
   const [department, setDepartment] = useState("All departments");
   const [period, setPeriod] = useState("Last 6 months");
   const [query, setQuery] = useState("");
+  const [requests, setRequests] = useState(demoLeaveRequests);
 
   const filteredRequests = useMemo(() => {
-    return leaveRequests.filter((request) => {
+    return requests.filter((request) => {
       const matchesDepartment = department === "All departments" || request.department === department;
       const text = `${request.employee} ${request.department} ${request.type} ${request.status}`.toLowerCase();
       return matchesDepartment && text.includes(query.toLowerCase());
     });
-  }, [department, query]);
+  }, [department, query, requests]);
+
+  const updateDemoRequest = (employee: string, status: "Approved" | "Rejected") => {
+    setRequests((current) =>
+      current.map((request) =>
+        request.employee === employee && request.status === "Pending"
+          ? { ...request, status }
+          : request,
+      ),
+    );
+  };
 
   const exportCsv = () => {
     const rows = [
@@ -281,10 +293,13 @@ export default function HRDashboard() {
               </div>
               <h1 className="text-2xl font-semibold tracking-tight">People Pulse</h1>
             </div>
-            <p className="mt-1 text-sm text-slate-500">HR overview • Sample data</p>
+            <p className="mt-1 text-sm text-slate-500">HR overview · Demo mode · Sample data only</p>
           </div>
           
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={onSignIn} variant="outline" className="rounded-xl">
+              Sign in for live data
+            </Button>
             <Select value={department} onValueChange={setDepartment}>
               <SelectTrigger className="w-[180px] rounded-xl bg-white">
                 <SelectValue />
@@ -418,7 +433,7 @@ export default function HRDashboard() {
               </div>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0 flex-1">
-              <table className="w-full min-w-[660px] text-left text-sm">
+              <table className="w-full min-w-[860px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
                   <tr>
                     <th className="px-5 py-3 font-medium">Employee</th>
@@ -426,6 +441,7 @@ export default function HRDashboard() {
                     <th className="px-4 py-3 font-medium">Dates</th>
                     <th className="px-4 py-3 font-medium">Days</th>
                     <th className="px-5 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Demo actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -447,6 +463,30 @@ export default function HRDashboard() {
                         <Badge variant="outline" className={`rounded-full ${statusStyles[request.status]}`}>
                           {request.status}
                         </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        {request.status === "Pending" ? (
+                          <div className="flex gap-1.5">
+                            <Button
+                              size="sm"
+                              onClick={() => updateDemoRequest(request.employee, "Approved")}
+                              className="h-8 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700"
+                            >
+                              <Check className="mr-1 h-3.5 w-3.5" />
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => updateDemoRequest(request.employee, "Rejected")}
+                              className="h-8 bg-rose-600 px-2 text-xs text-white hover:bg-rose-700"
+                            >
+                              <X className="mr-1 h-3.5 w-3.5" />
+                              Decline
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">Local demo only</span>
+                        )}
                       </td>
                     </tr>
                   ))}
