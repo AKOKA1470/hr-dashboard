@@ -41,9 +41,9 @@ requests attributed to their provisioned department/team. Every decision is rech
 the database, is limited to a pending request, and is recorded in an append-only decision
 table. Requests and decisions cannot be modified directly through the browser API.
 
-The existing chart dashboard is still available as a clearly marked, fictional local demo.
-Its sample actions are in-memory only. With no Supabase configuration, the app will not
-pretend that the demo is connected to live employee data.
+The dashboard preview contains no fabricated employee records, leave requests, or metrics.
+With no Supabase configuration, the app will not pretend that the preview is connected to
+live employee data.
 
 Leave duration is currently inclusive **calendar days**, with a maximum request span of
 366 days. Before production use, change and test this rule if the organization counts

@@ -122,10 +122,10 @@ function AuthScreen({
               className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900"
             >
               <ArrowLeft className="h-4 w-4" />
-              Explore the sample dashboard
+              View the empty dashboard preview
             </button>
             <p className="mt-2 text-xs leading-5 text-slate-500">
-              Demo data is fictional, local to this page, and never written to Supabase.
+              The preview contains no employee records or fabricated metrics.
             </p>
           </div>
         </section>
