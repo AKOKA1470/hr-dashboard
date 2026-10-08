@@ -1,6 +1,14 @@
 export type AppRole = "hr_admin" | "manager" | "employee";
 export type LeaveStatus = "pending" | "approved" | "declined";
 export type LeaveType = "earned" | "sick" | "casual";
+export type InductionModuleStatus = "draft" | "review" | "published";
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
 
 export type Database = {
   public: {
@@ -95,6 +103,103 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      induction_modules: {
+        Row: {
+          id: string;
+          created_by: string;
+          title: string;
+          source_file_name: string;
+          source_path: string;
+          source_file_size: number;
+          source_file_type: string;
+          conversion_mode: "metadata_template";
+          content: Json;
+          status: InductionModuleStatus;
+          created_at: string;
+          updated_at: string;
+          published_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_by: string;
+          title: string;
+          source_file_name: string;
+          source_path: string;
+          source_file_size: number;
+          source_file_type: string;
+          conversion_mode?: "metadata_template";
+          content?: Json;
+          status?: InductionModuleStatus;
+          created_at?: string;
+          updated_at?: string;
+          published_at?: string | null;
+        };
+        Update: Partial<{
+          title: string;
+          content: Json;
+          status: InductionModuleStatus;
+          published_at: string | null;
+          updated_at: string;
+        }>;
+        Relationships: [];
+      };
+      induction_assessment_keys: {
+        Row: { module_id: string; correct_choice: number };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      induction_assignments: {
+        Row: {
+          id: string;
+          module_id: string;
+          employee_id: string;
+          assigned_by: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      induction_progress: {
+        Row: {
+          assignment_id: string;
+          completed_topic_ids: string[];
+          activity_answers: Json;
+          poll_answers: Json;
+          assessment_choice: number | null;
+          assessment_passed: boolean;
+          completed_at: string | null;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      induction_questions: {
+        Row: {
+          id: string;
+          module_id: string | null;
+          author_id: string;
+          question: string;
+          answer: string | null;
+          answered_by: string | null;
+          created_at: string;
+          answered_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          module_id?: string | null;
+          author_id: string;
+          question: string;
+          answer?: string | null;
+          answered_by?: string | null;
+          created_at?: string;
+          answered_at?: string | null;
+        };
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -122,11 +227,40 @@ export type Database = {
         };
         Returns: undefined;
       };
+      assign_induction_roster: {
+        Args: { p_module_id: string; p_emails: string[] };
+        Returns: { email: string; status: string }[];
+      };
+      save_induction_module: {
+        Args: {
+          p_module_id: string;
+          p_title: string;
+          p_content: Json;
+          p_correct_choice: number;
+          p_status: InductionModuleStatus;
+        };
+        Returns: undefined;
+      };
+      save_induction_progress: {
+        Args: {
+          p_assignment_id: string;
+          p_completed_topic_ids: string[];
+          p_activity_answers: Json;
+          p_poll_answers: Json;
+          p_assessment_choice?: number | null;
+        };
+        Returns: boolean;
+      };
+      answer_induction_question: {
+        Args: { p_question_id: string; p_answer: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       app_role: AppRole;
       leave_status: LeaveStatus;
       leave_type: LeaveType;
+      induction_module_status: InductionModuleStatus;
     };
     CompositeTypes: Record<string, never>;
   };
