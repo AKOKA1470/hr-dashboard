@@ -1,7 +1,14 @@
 export type AppRole = "hr_admin" | "manager" | "employee";
 export type LeaveStatus = "pending" | "approved" | "declined";
 export type LeaveType = "earned" | "sick" | "casual";
-export type InductionModuleStatus = "draft" | "review" | "published";
+export type InductionModuleStatus =
+  | "draft"
+  | "review"
+  | "uploaded"
+  | "processing"
+  | "review_required"
+  | "generation_failed"
+  | "published";
 export type Json =
   | string
   | number
@@ -112,9 +119,10 @@ export type Database = {
           source_path: string;
           source_file_size: number;
           source_file_type: string;
-          conversion_mode: "metadata_template";
+          conversion_mode: "metadata_template" | "gemini_ai";
           content: Json;
           status: InductionModuleStatus;
+          conversion_stage: "extracting" | "generating" | null;
           created_at: string;
           updated_at: string;
           published_at: string | null;
@@ -127,9 +135,10 @@ export type Database = {
           source_path: string;
           source_file_size: number;
           source_file_type: string;
-          conversion_mode?: "metadata_template";
+          conversion_mode?: "metadata_template" | "gemini_ai";
           content?: Json;
           status?: InductionModuleStatus;
+          conversion_stage?: "extracting" | "generating" | null;
           created_at?: string;
           updated_at?: string;
           published_at?: string | null;
@@ -138,6 +147,7 @@ export type Database = {
           title: string;
           content: Json;
           status: InductionModuleStatus;
+          conversion_stage: "extracting" | "generating" | null;
           published_at: string | null;
           updated_at: string;
         }>;
@@ -145,6 +155,40 @@ export type Database = {
       };
       induction_assessment_keys: {
         Row: { module_id: string; correct_choice: number };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      induction_sections: {
+        Row: {
+          id: string;
+          module_id: string;
+          position: number;
+          title: string;
+          summary: string;
+          lessons: Json;
+          source_references: string[];
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      induction_activities: {
+        Row: {
+          id: string;
+          module_id: string;
+          section_id: string | null;
+          position: number;
+          activity_type: "scenario" | "quiz" | "knowledge_check" | "poll";
+          title: string;
+          prompt: string;
+          choices: Json;
+          correct_choice: number | null;
+          explanation: string | null;
+          source_references: string[];
+          created_at: string;
+        };
         Insert: never;
         Update: never;
         Relationships: [];
@@ -186,6 +230,12 @@ export type Database = {
           answered_by: string | null;
           created_at: string;
           answered_at: string | null;
+          question_type: "hrbp_question" | "quiz" | "knowledge_check";
+          choices: Json;
+          correct_choice: number | null;
+          explanation: string | null;
+          source_references: string[];
+          activity_id: string | null;
         };
         Insert: {
           id?: string;
@@ -196,6 +246,12 @@ export type Database = {
           answered_by?: string | null;
           created_at?: string;
           answered_at?: string | null;
+          question_type?: "hrbp_question" | "quiz" | "knowledge_check";
+          choices?: Json;
+          correct_choice?: number | null;
+          explanation?: string | null;
+          source_references?: string[];
+          activity_id?: string | null;
         };
         Update: never;
         Relationships: [];
@@ -240,6 +296,31 @@ export type Database = {
           p_status: InductionModuleStatus;
         };
         Returns: undefined;
+      };
+      begin_induction_conversion: {
+        Args: { p_module_id: string; p_file_path: string };
+        Returns: undefined;
+      };
+      set_induction_conversion_stage: {
+        Args: { p_module_id: string; p_stage: "extracting" | "generating" };
+        Returns: undefined;
+      };
+      fail_induction_conversion: {
+        Args: { p_module_id: string };
+        Returns: undefined;
+      };
+      complete_induction_conversion: {
+        Args: {
+          p_module_id: string;
+          p_file_path: string;
+          p_title: string;
+          p_content: Json;
+          p_sections: Json;
+          p_activities: Json;
+          p_questions: Json;
+          p_correct_choice: number;
+        };
+        Returns: string;
       };
       save_induction_progress: {
         Args: {

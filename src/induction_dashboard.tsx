@@ -36,19 +36,12 @@ type ModuleTopic = {
   activityPrompt: string;
   activityOptions: string[];
 };
-type ConversionResult = {
-  title: string;
-  content: ModuleContent;
-  correctChoice: number;
-  sourceFormat: "pdf" | "pptx";
-  model: string;
-};
-
 type ModuleContent = {
   conversionNote?: string;
   topics: ModuleTopic[];
   poll: { prompt: string; options: string[] };
   assessment: { question: string; options: string[] };
+  curriculum?: Json;
 };
 type InductionModule = {
   id: string;
@@ -58,9 +51,10 @@ type InductionModule = {
   source_path: string;
   source_file_size: number;
   source_file_type: string;
-  conversion_mode: "metadata_template";
+  conversion_mode: "metadata_template" | "gemini_ai";
   content: Json;
   status: InductionModuleStatus;
+  conversion_stage: "extracting" | "generating" | null;
   created_at: string;
   updated_at: string;
   published_at: string | null;
@@ -92,6 +86,7 @@ type Question = {
   answered_by: string | null;
   created_at: string;
   answered_at: string | null;
+  question_type: "hrbp_question" | "quiz" | "knowledge_check";
 };
 type RosterRow = { line: number; email: string; fullName: string };
 type RosterIssue = { line: number; reason: string; value: string };
@@ -111,11 +106,19 @@ const ROLE_LABELS: Record<AppRole, string> = {
 const STATUS_LABELS: Record<InductionModuleStatus, string> = {
   draft: "Draft",
   review: "In review",
+  uploaded: "Uploaded",
+  processing: "Converting",
+  review_required: "Ready for review",
+  generation_failed: "Conversion failed",
   published: "Published",
 };
 const STATUS_CLASSES: Record<InductionModuleStatus, string> = {
   draft: "border-slate-200 bg-slate-50 text-slate-700",
   review: "border-amber-200 bg-amber-50 text-amber-800",
+  uploaded: "border-slate-200 bg-slate-50 text-slate-700",
+  processing: "border-blue-200 bg-blue-50 text-blue-800",
+  review_required: "border-amber-200 bg-amber-50 text-amber-800",
+  generation_failed: "border-rose-200 bg-rose-50 text-rose-800",
   published: "border-emerald-200 bg-emerald-50 text-emerald-800",
 };
 const controlClass =
@@ -180,6 +183,7 @@ function parseContent(value: Json): ModuleContent {
       question: typeof assessment.question === "string" ? assessment.question : "",
       options: readOptions(assessment.options, 4),
     },
+    ...(content.curriculum === undefined ? {} : { curriculum: content.curriculum }),
   };
 }
 
@@ -188,47 +192,6 @@ function hasPollResponse(value: Json) {
     && typeof value === "object"
     && !Array.isArray(value)
     && "onboarding_poll" in value;
-}
-
-function validateConversionResult(value: unknown): ConversionResult {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("The AI conversion service returned an invalid response.");
-  }
-  const result = value as Record<string, unknown>;
-  const content = parseContent((result.content ?? {}) as Json);
-  if (
-    typeof result.title !== "string"
-    || !result.title.trim()
-    || !content.topics.length
-    || content.topics.some((topic) =>
-      !topic.title.trim()
-      || !topic.summary.trim()
-      || !topic.activityPrompt.trim()
-      || topic.sourceReferences.length < 1
-      || topic.activityOptions.length < 2
-      || topic.activityOptions.some((option) => !option.trim())
-    )
-    || !content.poll.prompt.trim()
-    || content.poll.options.length < 2
-    || content.poll.options.some((option) => !option.trim())
-    || !content.assessment.question.trim()
-    || content.assessment.options.length < 2
-    || content.assessment.options.some((option) => !option.trim())
-    || !Number.isInteger(result.correctChoice)
-    || (result.correctChoice as number) < 0
-    || (result.correctChoice as number) >= content.assessment.options.length
-    || (result.sourceFormat !== "pdf" && result.sourceFormat !== "pptx")
-    || typeof result.model !== "string"
-  ) {
-    throw new Error("The AI returned incomplete learning content. Fix the source deck or try again.");
-  }
-  return {
-    title: result.title.trim().slice(0, 180),
-    content,
-    correctChoice: result.correctChoice as number,
-    sourceFormat: result.sourceFormat,
-    model: result.model,
-  };
 }
 
 function csvRecords(source: string): string[][] {
@@ -405,6 +368,10 @@ export function InductionDashboard({
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [editingModuleId, setEditingModuleId] = useState("");
   const [aiDisclosureAccepted, setAiDisclosureAccepted] = useState(false);
+  const [companyName, setCompanyName] = useState("");
+  const [conversionPhase, setConversionPhase] = useState<
+    "idle" | "uploading" | "extracting" | "generating" | "review_required" | "generation_failed"
+  >("idle");
   const [editorTitle, setEditorTitle] = useState("");
   const [editorContent, setEditorContent] = useState<ModuleContent>(EMPTY_CONTENT);
   const [correctChoice, setCorrectChoice] = useState(0);
@@ -447,7 +414,7 @@ export function InductionDashboard({
 
       let moduleRows: InductionModule[] = [];
       const moduleColumns =
-        "id, created_by, title, source_file_name, source_path, source_file_size, source_file_type, conversion_mode, content, status, created_at, updated_at, published_at";
+        "id, created_by, title, source_file_name, source_path, source_file_size, source_file_type, conversion_mode, content, status, conversion_stage, created_at, updated_at, published_at";
       if (isHrbp) {
         const moduleResult = await supabase
           .from("induction_modules")
@@ -490,7 +457,8 @@ export function InductionDashboard({
 
       const questionResult = await supabase
         .from("induction_questions")
-        .select("id, module_id, author_id, question, answer, answered_by, created_at, answered_at")
+        .select("id, module_id, author_id, question, answer, answered_by, created_at, answered_at, question_type")
+        .eq("question_type", "hrbp_question")
         .order("created_at", { ascending: false });
       if (questionResult.error) throw new Error(`Unable to load HRBP questions: ${questionResult.error.message}`);
       const questionRows = (questionResult.data ?? []) as Question[];
@@ -578,6 +546,9 @@ export function InductionDashboard({
     ? progressByAssignment[courseAssignment.id] ?? emptyProgress(courseAssignment.id)
     : undefined;
   const courseContent = courseModule ? parseContent(courseModule.content) : EMPTY_CONTENT;
+  const previewableModules = modules.filter((module) =>
+    module.status === "review_required" || module.status === "published"
+  );
 
   const setModuleTopic = (topicIndex: number, update: Partial<ModuleTopic>) => {
     setEditorContent((current) => ({
@@ -610,8 +581,17 @@ export function InductionDashboard({
   const uploadDeck = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!supabase || !deckFile) return;
+    if (!aiDisclosureAccepted) {
+      setError("Confirm that your organization allows the uploaded deck to be analyzed by Google Gemini.");
+      return;
+    }
+    if (!companyName.trim()) {
+      setError("Enter the organization name to include in the induction draft context.");
+      return;
+    }
     const form = event.currentTarget;
     setBusy(true);
+    setConversionPhase("uploading");
     setError("");
     setNotice("");
     let sourcePath = "";
@@ -638,7 +618,8 @@ export function InductionDashboard({
           source_path: sourcePath,
           source_file_size: deckFile.size,
           source_file_type: mimeType,
-          conversion_mode: "metadata_template",
+          conversion_mode: "gemini_ai",
+          status: "uploaded",
         })
         .select("id")
         .single();
@@ -654,9 +635,11 @@ export function InductionDashboard({
       setTab("studio");
       setDeckFile(null);
       form.reset();
-      setNotice("Deck uploaded to private storage. You can generate a source-grounded AI draft when the conversion function is configured.");
+      setConversionPhase("extracting");
       await loadData();
+      await convertDeckWithAI(insertResult.data.id, sourcePath, companyName.trim(), true);
     } catch (caught) {
+      setConversionPhase("generation_failed");
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
@@ -673,34 +656,79 @@ export function InductionDashboard({
     setNotice("Manual starter outline created from the filename only. It contains no extracted deck content.");
   };
 
-  const convertDeckWithAI = async () => {
-    if (!supabase || !editingModuleId) return;
-    if (!aiDisclosureAccepted) {
+  const convertDeckWithAI = async (
+    moduleId = editingModuleId,
+    filePath?: string,
+    organizationName = companyName.trim(),
+    consentConfirmed = false,
+  ) => {
+    if (!supabase || !moduleId) return;
+    if (!consentConfirmed && !aiDisclosureAccepted) {
       setError("Confirm that sending this deck to Google Gemini is allowed by your organization's data policy.");
       return;
     }
-    const module = modules.find((item) => item.id === editingModuleId);
+    const module = modules.find((item) => item.id === moduleId);
     if (!module) {
-      setError("The uploaded deck could not be found. Refresh the module list and try again.");
-      return;
-    }
-    if ((assignmentCountByModule[module.id] ?? 0) > 0) {
+      if (!filePath) {
+        setError("The uploaded deck could not be found. Refresh the module list and try again.");
+        return;
+      }
+    } else if ((assignmentCountByModule[module.id] ?? 0) > 0) {
       setError("This module already has learner assignments. Create a revised module to preserve existing progress.");
       return;
     }
-    if (
-      editorContent.topics.length
-      && !window.confirm("Generate a new draft from the source deck? This replaces the current unsaved editor content.")
-    ) return;
 
     setBusy(true);
     setError("");
     setNotice("");
+    setConversionPhase("extracting");
     try {
-      const { data, error: conversionError } = await supabase.functions.invoke(
-        "convert-induction-deck",
-        { body: { module_id: module.id } },
-      );
+      const conversionPath = filePath ?? module?.source_path;
+      if (!conversionPath) throw new Error("The uploaded deck has no saved storage path.");
+      let requestSettled = false;
+      const resultPromise = supabase.functions.invoke("convert-induction", {
+        body: {
+          moduleId,
+          filePath: conversionPath,
+          companyName: organizationName,
+          extractedText: "",
+        },
+      }).then(
+        (result) => ({ result }),
+        (caught: unknown) => ({ caught }),
+      ).then((value) => {
+        requestSettled = true;
+        return value;
+      });
+
+      while (!requestSettled) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        const stageResult = await supabase
+          .from("induction_modules")
+          .select("status, conversion_stage")
+          .eq("id", moduleId)
+          .maybeSingle();
+        const conversionStatus = stageResult.data;
+        if (!stageResult.error && conversionStatus) {
+          setModules((current) => current.map((item) =>
+            item.id === moduleId
+              ? {
+                ...item,
+                status: conversionStatus.status,
+                conversion_stage: conversionStatus.conversion_stage,
+              }
+              : item
+          ));
+          if (conversionStatus.status === "generation_failed") setConversionPhase("generation_failed");
+          else if (conversionStatus.status === "review_required") setConversionPhase("review_required");
+          else setConversionPhase(conversionStatus.conversion_stage ?? "extracting");
+        }
+      }
+      const invocation = await resultPromise;
+      if ("caught" in invocation) {
+        throw new Error(invocation.caught instanceof Error ? invocation.caught.message : "The conversion request failed.");
+      }
+      const { data, error: conversionError } = invocation.result;
       if (conversionError) {
         let message = conversionError.message;
         if (conversionError.context instanceof Response) {
@@ -708,34 +736,21 @@ export function InductionDashboard({
             const responseBody = await conversionError.context.clone().json() as { error?: string };
             if (responseBody.error) message = responseBody.error;
           } catch {
-            // Keep the function client's message when the response is not JSON.
+            // Keep the function client's message if its response is not JSON.
           }
         }
         throw new Error(`AI conversion failed: ${message}`);
       }
-
-      const converted = validateConversionResult(data);
-      const saveResult = await supabase.rpc("save_induction_module", {
-        p_module_id: module.id,
-        p_title: converted.title,
-        p_content: JSON.parse(JSON.stringify({
-          ...converted.content,
-          conversionNote: `AI-generated draft using ${converted.model} from ${module.source_file_name}. Verify all policy statements and source references against the original deck before review or publishing.`,
-        })) as Json,
-        p_correct_choice: converted.correctChoice,
-        p_status: "draft",
-      });
-      if (saveResult.error) throw new Error(`AI draft was generated but could not be saved: ${saveResult.error.message}`);
-
-      setEditorTitle(converted.title);
-      setEditorContent(converted.content);
-      setCorrectChoice(converted.correctChoice);
-      setNotice(
-        `AI created an editable draft from the ${converted.sourceFormat.toUpperCase()} source using ${converted.model}. Review the cited source sections and verify every policy before publishing.`,
-      );
+      if (!data || data.moduleId !== moduleId || data.status !== "review_required") {
+        throw new Error("The conversion service did not confirm that the module is ready for review.");
+      }
+      setConversionPhase("review_required");
+      setNotice("AI-generated modules and activities are ready for review. Verify every policy and source reference before publishing.");
       await loadData();
     } catch (caught) {
+      setConversionPhase("generation_failed");
       setError(caught instanceof Error ? caught.message : String(caught));
+      await loadData();
     } finally {
       setBusy(false);
     }
@@ -743,6 +758,11 @@ export function InductionDashboard({
 
   const saveModule = async (status: InductionModuleStatus) => {
     if (!supabase || !editingModuleId) return;
+    const module = modules.find((item) => item.id === editingModuleId);
+    if (status === "published" && module?.status !== "review_required") {
+      setError("Save the module for review before publishing.");
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice("");
@@ -752,7 +772,7 @@ export function InductionDashboard({
         p_title: editorTitle.trim(),
         p_content: JSON.parse(JSON.stringify(editorContent)) as Json,
         p_correct_choice: correctChoice,
-        p_status: status,
+        p_status: status === "review" ? "review_required" : status,
       });
       if (result.error) throw new Error(`Unable to save module: ${result.error.message}`);
       setNotice(status === "published" ? "Module published and available for assignment." : status === "review" ? "Module saved for HR review." : "Draft saved.");
@@ -1048,11 +1068,11 @@ export function InductionDashboard({
               <p className="text-sm font-medium text-slate-800">{profile.full_name}</p>
               <p className="text-xs text-slate-500">{ROLE_LABELS[profile.role]} · {email}</p>
             </div>
-            {isHrbp && modules.length > 0 && (
+            {isHrbp && previewableModules.length > 0 && (
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedModuleId(modules[0].id);
+                  setSelectedModuleId(previewableModules[0].id);
                   navigateTab("preview");
                 }}
                 className={secondaryButton}
@@ -1181,7 +1201,7 @@ export function InductionDashboard({
                         <button type="button" className={secondaryButton} onClick={() => { setEditingModuleId(module.id); navigateTab("studio"); }}>
                           Edit
                         </button>
-                        <button type="button" className={secondaryButton} onClick={() => { setSelectedModuleId(module.id); navigateTab("preview"); }}>
+                        <button type="button" className={secondaryButton} disabled={module.status !== "review_required" && module.status !== "published"} onClick={() => { setSelectedModuleId(module.id); navigateTab("preview"); }}>
                           Preview
                         </button>
                       </div>
@@ -1239,7 +1259,19 @@ export function InductionDashboard({
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
                   Upload a PDF or PowerPoint file to private storage, then generate an editable learning draft from the source. PDFs and PPTX files are supported for AI conversion; legacy PPT files must be converted to PDF or PPTX first.
                 </p>
-                <form onSubmit={uploadDeck} className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end">
+                <form onSubmit={uploadDeck} className="mt-5 space-y-4">
+                  <label className="block max-w-xl text-sm font-medium text-slate-700">
+                    Organization name
+                    <input
+                      className={controlClass}
+                      maxLength={120}
+                      required
+                      value={companyName}
+                      onChange={(event) => setCompanyName(event.target.value)}
+                    />
+                    <span className="mt-1 block text-xs font-normal text-slate-500">Used as context only. The converter will not infer policies from the name.</span>
+                  </label>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
                   <label className="block flex-1 text-sm font-medium text-slate-700">
                     Deck file
                     <input
@@ -1250,10 +1282,20 @@ export function InductionDashboard({
                     />
                     <span className="mt-1 block text-xs font-normal text-slate-500">PDF, PPT, or PPTX · 50 MB upload limit · AI conversion up to 20 MB</span>
                   </label>
-                  <button type="submit" className={primaryButton} disabled={!deckFile || busy}>
+                  <button type="submit" className={primaryButton} disabled={!deckFile || busy || !aiDisclosureAccepted || !companyName.trim()}>
                     {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-                    Upload deck
+                    {conversionPhase === "uploading" ? "Uploading" : conversionPhase === "extracting" ? "Extracting content" : conversionPhase === "generating" ? "Generating activities" : "Upload and convert"}
                   </button>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={aiDisclosureAccepted}
+                      onChange={(event) => setAiDisclosureAccepted(event.target.checked)}
+                    />
+                    <span>I confirm my organization allows this deck to be sent to Google Gemini for analysis. I have removed personal or sensitive employee data that should not be shared with the AI provider.</span>
+                  </label>
                 </form>
                 <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
                   <strong>Before publishing:</strong> AI output is a draft, not policy. HR must verify each topic, activity, assessment answer, and source citation against approved materials.
@@ -1300,37 +1342,47 @@ export function InductionDashboard({
                   {!contentReady ? (
                     <section className="rounded-xl border border-slate-200 bg-white p-6">
                       <p className="text-sm text-slate-500">{module.source_file_name} · {formatBytes(module.source_file_size)}</p>
-                      <h2 className="mt-2 text-lg font-semibold">Create an editable starter outline</h2>
+                      <h2 className="mt-2 text-lg font-semibold">{module.status === "generation_failed" ? "Conversion failed" : "Preparing interactive induction"}</h2>
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        Generate an editable, source-grounded draft with Gemini, including learning topics, scenario activities, a poll, a knowledge check, and slide/page references. The AI service must be configured for this Supabase project.
+                        {module.status === "generation_failed"
+                          ? "The uploaded deck is still available. Review the error, confirm AI data sharing, and retry conversion."
+                          : "The uploaded deck is being extracted and converted into lessons, scenarios, quizzes, knowledge checks, and a learner poll."}
                       </p>
-                      <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={aiDisclosureAccepted}
-                          onChange={(event) => setAiDisclosureAccepted(event.target.checked)}
-                        />
-                        <span>
-                          I confirm my organization allows this deck to be sent to Google Gemini for analysis. I have removed personal or sensitive employee data that should not be shared with the AI provider.
-                        </span>
-                      </label>
+                      {module.status === "processing" && (
+                        <p role="status" className="mt-4 rounded-lg bg-blue-50 p-4 text-sm text-blue-900">
+                          {module.conversion_stage === "generating" ? "Generating activities" : "Extracting content"} · This may take up to two minutes.
+                        </p>
+                      )}
+                      {["generation_failed", "uploaded", "draft"].includes(module.status) && (
+                        <>
+                          <label className="mt-4 block max-w-xl text-sm font-medium text-slate-700">
+                            Organization name
+                            <input className={controlClass} maxLength={120} value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+                          </label>
+                          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={aiDisclosureAccepted}
+                              onChange={(event) => setAiDisclosureAccepted(event.target.checked)}
+                            />
+                            <span>I confirm this deck may be sent to Google Gemini for retry. Sensitive employee data has been removed.</span>
+                          </label>
+                        </>
+                      )}
                       <div className="mt-5 flex flex-wrap gap-2">
-                        <button type="button" className={primaryButton} onClick={() => void convertDeckWithAI()} disabled={busy || !aiDisclosureAccepted}>
-                          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                          {busy ? "Analyzing source deck..." : "Generate interactive draft with AI"}
-                        </button>
-                        <button type="button" className={secondaryButton} onClick={createOutline} disabled={busy}>
+                        {(module.status === "generation_failed" || module.status === "uploaded" || module.status === "draft") && (
+                          <button type="button" className={primaryButton} onClick={() => void convertDeckWithAI()} disabled={busy || !aiDisclosureAccepted || !companyName.trim()}>
+                            {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                            {busy ? conversionPhase === "generating" ? "Generating activities" : "Extracting content" : module.status === "generation_failed" ? "Retry conversion" : "Convert deck with AI"}
+                          </button>
+                        )}
+                        <button type="button" className={secondaryButton} onClick={createOutline} disabled={busy || module.status === "processing"}>
                           Create manual outline
                         </button>
                       </div>
-                      {busy && (
-                        <p role="status" className="mt-3 text-sm text-slate-600">
-                          Reading the source deck and generating draft learning activities. This can take up to a minute.
-                        </p>
-                      )}
                       <p className="mt-3 text-xs leading-5 text-slate-500">
-                        PDF slide content is analyzed by Gemini. PPTX slide text is extracted locally in the Edge Function before analysis. Unsupported or unreadable content is reported instead of invented.
+                        AI-generated material is a draft. Verify every policy and source reference against the uploaded file before review or publication.
                       </p>
                     </section>
                   ) : (
@@ -1345,7 +1397,7 @@ export function InductionDashboard({
                             <button type="button" className={secondaryButton} disabled={busy} onClick={() => void openSourceDeck(module)}>
                               Open source deck
                             </button>
-                            <button type="button" className={secondaryButton} onClick={() => { setSelectedModuleId(module.id); navigateTab("preview"); }}>
+                            <button type="button" className={secondaryButton} disabled={module.status !== "review_required" && module.status !== "published"} onClick={() => { setSelectedModuleId(module.id); navigateTab("preview"); }}>
                               Preview learner view
                             </button>
                           </div>
@@ -1478,7 +1530,7 @@ export function InductionDashboard({
                         <button type="button" className={secondaryButton} disabled={busy} onClick={() => void saveModule("review")}>
                           <ClipboardList className="h-4 w-4" /> Save for review
                         </button>
-                        <button type="button" className={primaryButton} disabled={busy} onClick={() => void saveModule("published")}>
+                        <button type="button" className={primaryButton} disabled={busy || module.status !== "review_required"} onClick={() => void saveModule("published")}>
                           {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                           Publish module
                         </button>
@@ -1734,11 +1786,11 @@ export function InductionDashboard({
             <label className="mb-4 block text-sm font-medium text-slate-700">
               Module
               <select className={controlClass} value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)}>
-                {modules.map((module) => <option key={module.id} value={module.id}>{module.title} · {STATUS_LABELS[module.status]}</option>)}
+                {previewableModules.map((module) => <option key={module.id} value={module.id}>{module.title} · {STATUS_LABELS[module.status]}</option>)}
               </select>
             </label>
             {(() => {
-              const module = modules.find((item) => item.id === selectedModuleId);
+              const module = previewableModules.find((item) => item.id === selectedModuleId);
               const content = module ? parseContent(module.content) : EMPTY_CONTENT;
               return module ? (
                 <article className="overflow-hidden rounded-xl border border-slate-200 bg-white">
