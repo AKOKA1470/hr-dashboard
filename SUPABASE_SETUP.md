@@ -16,13 +16,16 @@ project, credentials, or employee records are included here.
    `VITE_` variable, browser bundle, repository, or employee device.
 3. Apply the migrations under `supabase/migrations/` in timestamp order using the Supabase
    CLI (`supabase db push`) or the SQL editor. Treat migration access as privileged.
-4. Add the organization's departments and optional teams to `public.departments` and
-   `public.teams`. The migration intentionally inserts no organization or employee data.
+4. The employee-directory migration adds department codes and seeds the supplied
+   department/designation catalog. Add any additional departments and optional teams using
+   a trusted administrator session.
 5. Invite each employee through Supabase Authentication. Using a trusted administrator
    session (for example, the Supabase SQL editor), create a matching
    `public.profiles` row for that auth user with a verified full name, role, department,
-   and optional team. Create the first `hr_admin` this way. Do not derive roles from
-   user-editable auth metadata or allow public sign-up to create profiles.
+   and optional team. Create the first `hr_admin` this way. A corresponding
+   `public.employee_profiles` row can then record the employee number, work details, and
+   reporting manager. Do not derive roles from user-editable auth metadata or allow public
+   sign-up to create profiles.
 6. Add each manager's permitted department/team rows to `public.manager_scopes`. A
    `NULL` team grants that manager the whole department; a team ID grants only that
    team. Use one row per explicitly authorized scope, and periodically audit and remove
@@ -89,6 +92,21 @@ published, and publishing requires the `review_required` status. Employee learni
 poll responses, assessment results, HRBP questions, and reports are stored under the database
 policies and functions introduced by the migration; the dashboard does not seed sample
 modules, employees, or analytics.
+
+### Employee directory
+
+`20261009145000_employee_directory.sql` extends the existing `departments` table rather
+than replacing it, adds designations, employee profiles, employee role assignments,
+manager history, and private employee-import staging. Existing Supabase Auth accounts and
+`public.profiles` remain the authentication/authorization source. Each employee-directory
+profile links to its provisioned `public.profiles` row through `user_id`; induction
+assignments continue to use that same auth user ID. The directory migration seeds only the
+organization's department and designation catalog, not employee accounts or employee
+profiles. It validates manager cycles and records manager changes. Emergency contact and
+phone fields are not granted to browser clients. Import staging is reserved for a future
+trusted HR import flow; no employee is imported or invited by this migration.
+The current permission checks continue to use `public.profiles.role`; the directory's role
+catalog and assignment tables are not yet a replacement for those authorization checks.
 
 The dashboard preview contains no fabricated employee records, leave requests, or metrics.
 With no Supabase configuration, the app will not pretend that the preview is connected to

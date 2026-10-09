@@ -1,6 +1,6 @@
 begin;
 
-select plan(33);
+select plan(39);
 
 insert into public.departments (id, name) values
   ('10000000-0000-4000-8000-000000000001', 'Induction test department');
@@ -24,6 +24,37 @@ insert into public.profiles (id, full_name, role, department_id) values
    '10000000-0000-4000-8000-000000000001'),
   ('30000000-0000-4000-8000-000000000003', 'Other Employee', 'employee',
    '10000000-0000-4000-8000-000000000001');
+
+insert into public.employee_profiles (
+  id, user_id, employee_number, work_email, first_name, display_name,
+  department_id, designation_id, date_of_joining
+) values (
+  '40000000-0000-4000-8000-000000000001',
+  '30000000-0000-4000-8000-000000000001',
+  'TEST-HR-001',
+  'induction-hr@example.test',
+  'Induction',
+  'Induction HR',
+  (select id from public.departments where code = 'HR'),
+  (select id from public.designations where code = 'HR_HEAD'),
+  current_date
+);
+
+insert into public.employee_profiles (
+  id, user_id, employee_number, work_email, first_name, display_name,
+  department_id, designation_id, manager_id, date_of_joining
+) values (
+  '40000000-0000-4000-8000-000000000002',
+  '30000000-0000-4000-8000-000000000002',
+  'TEST-EMP-001',
+  'induction-employee@example.test',
+  'Induction',
+  'Induction Employee',
+  (select id from public.departments where code = 'HR'),
+  (select id from public.designations where code = 'RECRUITER'),
+  '40000000-0000-4000-8000-000000000001',
+  current_date
+);
 
 insert into public.induction_modules (
   id, created_by, title, source_file_name, source_path, source_file_size,
@@ -90,9 +121,30 @@ insert into public.induction_assignments (id, module_id, employee_id, assigned_b
     '30000000-0000-4000-8000-000000000001'
   );
 
+select is(
+  (select count(*)::integer from public.designations where is_active),
+  8,
+  'The employee directory has the supplied active designation catalog'
+);
+
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000002', true);
 
+select is(
+  (select count(*)::integer from public.employee_profiles),
+  1,
+  'Employee can read only their own directory profile'
+);
+select throws_ok(
+  $$select emergency_contact_phone from public.employee_profiles limit 1$$,
+  '42501',
+  'Employee directory access excludes emergency contact details'
+);
+select is(
+  (select count(*)::integer from public.employee_import_staging),
+  0,
+  'Employee cannot read HR employee-import staging data'
+);
 select throws_ok(
   $$select correct_choice from public.induction_activities$$,
   '42501',
@@ -173,6 +225,20 @@ select throws_ok(
 );
 
 select set_config('request.jwt.claim.sub', '30000000-0000-4000-8000-000000000001', true);
+select is(
+  (select count(*)::integer from public.employee_profiles),
+  2,
+  'HR can read employee directory profiles'
+);
+reset role;
+select throws_ok(
+  $$update public.employee_profiles
+    set manager_id = '40000000-0000-4000-8000-000000000002'
+    where id = '40000000-0000-4000-8000-000000000001'$$,
+  '23514',
+  'Reporting relationships cannot contain a manager cycle'
+);
+set local role authenticated;
 select lives_ok(
   $$select public.begin_induction_conversion(
     '50000000-0000-4000-8000-000000000002',
