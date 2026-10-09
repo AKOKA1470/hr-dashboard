@@ -4,6 +4,7 @@ import {
   BriefcaseBusiness,
   Check,
   Clock3,
+  GraduationCap,
   LoaderCircle,
   LogOut,
   X,
@@ -55,10 +56,12 @@ export function LeaveDashboard({
   profile,
   email,
   onSignOut,
+  onNavigateInduction,
 }: {
   profile: Profile;
   email: string;
   onSignOut: () => void;
+  onNavigateInduction: () => void;
 }) {
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<Record<string, string>>({});
@@ -206,13 +209,23 @@ export function LeaveDashboard({
               <p className="text-xs text-slate-500">Live leave management</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-right">
               <p className="text-sm font-medium text-slate-800">{profile.full_name}</p>
               <p className="text-xs text-slate-500">
                 {roleLabels[profile.role]} · {email}
               </p>
             </div>
+            {profile.role !== "manager" && (
+              <button
+                type="button"
+                onClick={onNavigateInduction}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              >
+                <GraduationCap className="h-4 w-4" />
+                Induction
+              </button>
+            )}
             <button
               onClick={onSignOut}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"

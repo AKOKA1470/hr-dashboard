@@ -1,7 +1,7 @@
 # Supabase setup and security notes
 
-The application is **not production-ready** until a Supabase project is configured, this
-migration and the authorization tests have been applied and reviewed, and the organization
+The application is **not production-ready** until a Supabase project is configured, all
+migrations and authorization tests have been applied and reviewed, and the organization
 has validated its role assignments, leave rules, and operational controls. No production
 project, credentials, or employee records are included here.
 
@@ -14,8 +14,8 @@ project, credentials, or employee records are included here.
    `VITE_SUPABASE_ANON_KEY` from the project API settings. The URL and publishable/anon
    key are public client configuration; never add a `service_role` or secret key to a
    `VITE_` variable, browser bundle, repository, or employee device.
-3. Apply `supabase/migrations/20261006220000_hr_leave_security.sql` using the Supabase CLI
-   (`supabase db push`) or the SQL editor. Treat migration access as privileged.
+3. Apply the migrations under `supabase/migrations/` in timestamp order using the Supabase
+   CLI (`supabase db push`) or the SQL editor. Treat migration access as privileged.
 4. Add the organization's departments and optional teams to `public.departments` and
    `public.teams`. The migration intentionally inserts no organization or employee data.
 5. Invite each employee through Supabase Authentication. Using a trusted administrator
@@ -40,6 +40,23 @@ and team match a configured scope; employees can only read their own requests an
 requests attributed to their provisioned department/team. Every decision is rechecked in
 the database, is limited to a pending request, and is recorded in an append-only decision
 table. Requests and decisions cannot be modified directly through the browser API.
+
+## Employee induction
+
+The induction module requires the `20261008000000_employee_induction.sql` migration in
+addition to the HR leave migration. It creates the private `induction-decks` storage bucket,
+role-scoped module and progress tables, and guarded assignment, progress, and HRBP-answer
+functions. HR users must have the existing `hr_admin` role; learners must have an
+`employee` profile and a matching, provisioned Supabase Auth email before a roster row can
+be assigned. The roster CSV requires `email` and `full_name` headers. Importing a roster
+never provisions an account or creates a profile.
+
+No AI provider or slide-text extraction service is configured. The current conversion action
+creates an editable starter outline from the uploaded filename only; it does not read or
+summarize PDF/PowerPoint content. HR must replace the prompts with verified organization
+guidance before publishing. Employee learning progress, poll responses, assessment results,
+HRBP questions, and reports are stored under the database policies and functions introduced
+by the migration; the dashboard does not seed sample modules, employees, or analytics.
 
 The dashboard preview contains no fabricated employee records, leave requests, or metrics.
 With no Supabase configuration, the app will not pretend that the preview is connected to

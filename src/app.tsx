@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ArrowLeft, BriefcaseBusiness, LoaderCircle, LockKeyhole } from "lucide-react";
 import HRDashboard from "./hr_dashboard";
+import { InductionDashboard } from "./induction_dashboard";
 import { LeaveDashboard } from "./leave_dashboard";
 import type { AppRole } from "./lib/database.types";
 import { supabase, supabaseConfiguration } from "./lib/supabase";
@@ -160,6 +161,7 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [showDemo, setShowDemo] = useState(false);
+  const [activeArea, setActiveArea] = useState<"leave" | "induction">("leave");
 
   useEffect(() => {
     if (!supabase) return;
@@ -281,5 +283,20 @@ export default function App() {
     );
   }
 
-  return <LeaveDashboard profile={profile} email={session.user.email ?? ""} onSignOut={signOut} />;
+  return activeArea === "induction" ? (
+    <InductionDashboard
+      profile={profile}
+      email={session.user.email ?? ""}
+      userId={session.user.id}
+      onSignOut={signOut}
+      onNavigateLeave={() => setActiveArea("leave")}
+    />
+  ) : (
+    <LeaveDashboard
+      profile={profile}
+      email={session.user.email ?? ""}
+      onSignOut={signOut}
+      onNavigateInduction={() => setActiveArea("induction")}
+    />
+  );
 }
