@@ -51,12 +51,36 @@ functions. HR users must have the existing `hr_admin` role; learners must have a
 be assigned. The roster CSV requires `email` and `full_name` headers. Importing a roster
 never provisions an account or creates a profile.
 
-No AI provider or slide-text extraction service is configured. The current conversion action
-creates an editable starter outline from the uploaded filename only; it does not read or
-summarize PDF/PowerPoint content. HR must replace the prompts with verified organization
-guidance before publishing. Employee learning progress, poll responses, assessment results,
-HRBP questions, and reports are stored under the database policies and functions introduced
-by the migration; the dashboard does not seed sample modules, employees, or analytics.
+### Configure AI deck conversion
+
+Deploy the authenticated Edge Function and set its Gemini key as a server-side secret:
+
+```powershell
+supabase functions deploy convert-induction-deck
+```
+
+In the Supabase Dashboard, add `GEMINI_API_KEY` under the project's Edge Function secrets.
+Optionally add `GEMINI_MODEL` to select another supported Gemini model; the default is
+`gemini-2.5-flash`. Never add the key to `.env.local`, a `VITE_` variable, the browser
+bundle, or source control. The function verifies the signed-in HR administrator, reads the
+uploaded deck from private Supabase Storage, and calls Gemini from the server.
+
+PDF files are sent to Gemini for document analysis. PPTX slide text is extracted in the Edge
+Function and sent for analysis; images and speaker notes in PPTX are not extracted. AI
+conversion supports PDF and PPTX files up to 20 MB. Legacy PPT files must be converted to
+PDF or PPTX first. The function requests deletion of temporary Gemini PDF uploads after
+conversion; if the provider does not confirm deletion, its service retention policy applies.
+If the function or secret is not deployed, the app reports that AI conversion is not
+configured; HR can still create a clearly labeled, filename-only manual outline.
+The HRBP must confirm the organization's data-sharing policy before each AI conversion;
+deck content is sent to Google's Gemini service for processing.
+
+AI output is saved as an editable draft and includes suggested source page/slide references.
+These references and generated text can be incomplete or inaccurate: HR must verify all
+content against approved materials before review or publishing. Employee learning progress,
+poll responses, assessment results, HRBP questions, and reports are stored under the database
+policies and functions introduced by the migration; the dashboard does not seed sample
+modules, employees, or analytics.
 
 The dashboard preview contains no fabricated employee records, leave requests, or metrics.
 With no Supabase configuration, the app will not pretend that the preview is connected to

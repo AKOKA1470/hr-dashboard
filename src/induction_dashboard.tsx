@@ -32,8 +32,16 @@ type ModuleTopic = {
   id: string;
   title: string;
   summary: string;
+  sourceReferences: string[];
   activityPrompt: string;
   activityOptions: string[];
+};
+type ConversionResult = {
+  title: string;
+  content: ModuleContent;
+  correctChoice: number;
+  sourceFormat: "pdf" | "pptx";
+  model: string;
 };
 
 type ModuleContent = {
@@ -141,6 +149,9 @@ function parseContent(value: Json): ModuleContent {
           id: typeof topic.id === "string" ? topic.id : `topic-${index + 1}`,
           title: typeof topic.title === "string" ? topic.title : "",
           summary: typeof topic.summary === "string" ? topic.summary : "",
+          sourceReferences: Array.isArray(topic.sourceReferences)
+            ? topic.sourceReferences.filter((reference): reference is string => typeof reference === "string")
+            : [],
           activityPrompt: typeof topic.activityPrompt === "string" ? topic.activityPrompt : "",
           activityOptions: Array.isArray(topic.activityOptions)
             ? topic.activityOptions.filter((option): option is string => typeof option === "string")
@@ -177,6 +188,47 @@ function hasPollResponse(value: Json) {
     && typeof value === "object"
     && !Array.isArray(value)
     && "onboarding_poll" in value;
+}
+
+function validateConversionResult(value: unknown): ConversionResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The AI conversion service returned an invalid response.");
+  }
+  const result = value as Record<string, unknown>;
+  const content = parseContent((result.content ?? {}) as Json);
+  if (
+    typeof result.title !== "string"
+    || !result.title.trim()
+    || !content.topics.length
+    || content.topics.some((topic) =>
+      !topic.title.trim()
+      || !topic.summary.trim()
+      || !topic.activityPrompt.trim()
+      || topic.sourceReferences.length < 1
+      || topic.activityOptions.length < 2
+      || topic.activityOptions.some((option) => !option.trim())
+    )
+    || !content.poll.prompt.trim()
+    || content.poll.options.length < 2
+    || content.poll.options.some((option) => !option.trim())
+    || !content.assessment.question.trim()
+    || content.assessment.options.length < 2
+    || content.assessment.options.some((option) => !option.trim())
+    || !Number.isInteger(result.correctChoice)
+    || (result.correctChoice as number) < 0
+    || (result.correctChoice as number) >= content.assessment.options.length
+    || (result.sourceFormat !== "pdf" && result.sourceFormat !== "pptx")
+    || typeof result.model !== "string"
+  ) {
+    throw new Error("The AI returned incomplete learning content. Fix the source deck or try again.");
+  }
+  return {
+    title: result.title.trim().slice(0, 180),
+    content,
+    correctChoice: result.correctChoice as number,
+    sourceFormat: result.sourceFormat,
+    model: result.model,
+  };
 }
 
 function csvRecords(source: string): string[][] {
@@ -282,6 +334,7 @@ function starterContent(filename: string): ModuleContent {
         id: crypto.randomUUID(),
         title: "Welcome and first days",
         summary: `Add verified welcome guidance from “${title}”.`,
+        sourceReferences: [],
         activityPrompt: "Add a realistic first-day scenario and the action you want a new employee to take.",
         activityOptions: ["", "", ""],
       },
@@ -289,6 +342,7 @@ function starterContent(filename: string): ModuleContent {
         id: crypto.randomUUID(),
         title: "How we work",
         summary: "Add approved information about team practices, tools, and expectations.",
+        sourceReferences: [],
         activityPrompt: "Add a work scenario that helps employees apply your team's guidance.",
         activityOptions: ["", "", ""],
       },
@@ -296,6 +350,7 @@ function starterContent(filename: string): ModuleContent {
         id: crypto.randomUUID(),
         title: "Getting help",
         summary: "Add the correct contacts and support routes for your organization.",
+        sourceReferences: [],
         activityPrompt: "Add a scenario about where an employee should go for help.",
         activityOptions: ["", "", ""],
       },
@@ -349,6 +404,7 @@ export function InductionDashboard({
   const [busy, setBusy] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [editingModuleId, setEditingModuleId] = useState("");
+  const [aiDisclosureAccepted, setAiDisclosureAccepted] = useState(false);
   const [editorTitle, setEditorTitle] = useState("");
   const [editorContent, setEditorContent] = useState<ModuleContent>(EMPTY_CONTENT);
   const [correctChoice, setCorrectChoice] = useState(0);
@@ -486,6 +542,7 @@ export function InductionDashboard({
 
   useEffect(() => {
     if (!editingModuleId) return;
+    setAiDisclosureAccepted(false);
     const module = modules.find((item) => item.id === editingModuleId);
     if (!module) return;
     setEditorTitle(module.title);
@@ -560,13 +617,11 @@ export function InductionDashboard({
     let sourcePath = "";
     try {
       const extension = deckFile.name.split(".").pop()?.toLowerCase() ?? "bin";
-      const mimeType =
-        deckFile.type ||
-        (extension === "pdf"
-          ? "application/pdf"
-          : extension === "ppt"
-            ? "application/vnd.ms-powerpoint"
-            : "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+      const mimeType = extension === "pdf"
+        ? "application/pdf"
+        : extension === "ppt"
+          ? "application/vnd.ms-powerpoint"
+          : "application/vnd.openxmlformats-officedocument.presentationml.presentation";
       const safeName = deckFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       sourcePath = `${userId}/${crypto.randomUUID()}-${safeName}`;
       const uploadResult = await supabase.storage
@@ -599,7 +654,7 @@ export function InductionDashboard({
       setTab("studio");
       setDeckFile(null);
       form.reset();
-      setNotice("Deck uploaded. Create a metadata-only outline, then replace its placeholders with approved content.");
+      setNotice("Deck uploaded to private storage. You can generate a source-grounded AI draft when the conversion function is configured.");
       await loadData();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -611,10 +666,79 @@ export function InductionDashboard({
   const createOutline = () => {
     const module = modules.find((item) => item.id === editingModuleId);
     if (!module) return;
+    setError("");
     setEditorTitle(module.title || module.source_file_name.replace(/\.[^.]+$/, ""));
     setEditorContent(starterContent(module.source_file_name));
     setCorrectChoice(0);
-    setNotice("Starter outline created from filename metadata only. No AI model or slide-text extraction is connected.");
+    setNotice("Manual starter outline created from the filename only. It contains no extracted deck content.");
+  };
+
+  const convertDeckWithAI = async () => {
+    if (!supabase || !editingModuleId) return;
+    if (!aiDisclosureAccepted) {
+      setError("Confirm that sending this deck to Google Gemini is allowed by your organization's data policy.");
+      return;
+    }
+    const module = modules.find((item) => item.id === editingModuleId);
+    if (!module) {
+      setError("The uploaded deck could not be found. Refresh the module list and try again.");
+      return;
+    }
+    if ((assignmentCountByModule[module.id] ?? 0) > 0) {
+      setError("This module already has learner assignments. Create a revised module to preserve existing progress.");
+      return;
+    }
+    if (
+      editorContent.topics.length
+      && !window.confirm("Generate a new draft from the source deck? This replaces the current unsaved editor content.")
+    ) return;
+
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const { data, error: conversionError } = await supabase.functions.invoke(
+        "convert-induction-deck",
+        { body: { module_id: module.id } },
+      );
+      if (conversionError) {
+        let message = conversionError.message;
+        if (conversionError.context instanceof Response) {
+          try {
+            const responseBody = await conversionError.context.clone().json() as { error?: string };
+            if (responseBody.error) message = responseBody.error;
+          } catch {
+            // Keep the function client's message when the response is not JSON.
+          }
+        }
+        throw new Error(`AI conversion failed: ${message}`);
+      }
+
+      const converted = validateConversionResult(data);
+      const saveResult = await supabase.rpc("save_induction_module", {
+        p_module_id: module.id,
+        p_title: converted.title,
+        p_content: JSON.parse(JSON.stringify({
+          ...converted.content,
+          conversionNote: `AI-generated draft using ${converted.model} from ${module.source_file_name}. Verify all policy statements and source references against the original deck before review or publishing.`,
+        })) as Json,
+        p_correct_choice: converted.correctChoice,
+        p_status: "draft",
+      });
+      if (saveResult.error) throw new Error(`AI draft was generated but could not be saved: ${saveResult.error.message}`);
+
+      setEditorTitle(converted.title);
+      setEditorContent(converted.content);
+      setCorrectChoice(converted.correctChoice);
+      setNotice(
+        `AI created an editable draft from the ${converted.sourceFormat.toUpperCase()} source using ${converted.model}. Review the cited source sections and verify every policy before publishing.`,
+      );
+      await loadData();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveModule = async (status: InductionModuleStatus) => {
@@ -1102,7 +1226,7 @@ export function InductionDashboard({
               <div className="rounded-xl border border-slate-200 bg-white p-5">
                 <h2 className="font-semibold">Conversion transparency</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  AI slide extraction is not connected. The draft workflow stores the uploaded deck and creates editable placeholders from its filename only—no slide content or policy is inferred.
+                  The studio can use the configured Gemini Edge Function to read PDF slides or PPTX slide text and create a cited draft. HR must verify every generated statement against the deck before review or publishing.
                 </p>
               </div>
             </section>
@@ -1113,7 +1237,7 @@ export function InductionDashboard({
               <section className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6">
                 <h2 className="text-lg font-semibold">Upload induction deck</h2>
                 <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
-                  Upload a PDF or PowerPoint file to private storage. The first conversion step is a transparent metadata-only outline; it does not read or summarize the deck.
+                  Upload a PDF or PowerPoint file to private storage, then generate an editable learning draft from the source. PDFs and PPTX files are supported for AI conversion; legacy PPT files must be converted to PDF or PPTX first.
                 </p>
                 <form onSubmit={uploadDeck} className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-end">
                   <label className="block flex-1 text-sm font-medium text-slate-700">
@@ -1124,7 +1248,7 @@ export function InductionDashboard({
                       accept=".pdf,.ppt,.pptx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                       onChange={handleDeckSelection}
                     />
-                    <span className="mt-1 block text-xs font-normal text-slate-500">PDF, PPT, or PPTX · 50 MB maximum</span>
+                    <span className="mt-1 block text-xs font-normal text-slate-500">PDF, PPT, or PPTX · 50 MB upload limit · AI conversion up to 20 MB</span>
                   </label>
                   <button type="submit" className={primaryButton} disabled={!deckFile || busy}>
                     {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
@@ -1132,7 +1256,7 @@ export function InductionDashboard({
                   </button>
                 </form>
                 <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-                  <strong>Before publishing:</strong> verify every topic and answer against your approved source material. This workflow is not an AI analysis service.
+                  <strong>Before publishing:</strong> AI output is a draft, not policy. HR must verify each topic, activity, assessment answer, and source citation against approved materials.
                 </div>
               </section>
             ) : (() => {
@@ -1178,11 +1302,36 @@ export function InductionDashboard({
                       <p className="text-sm text-slate-500">{module.source_file_name} · {formatBytes(module.source_file_size)}</p>
                       <h2 className="mt-2 text-lg font-semibold">Create an editable starter outline</h2>
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        No AI service is configured. This action uses the deck filename to create generic, editable section placeholders only. It does not inspect slides or create policy statements.
+                        Generate an editable, source-grounded draft with Gemini, including learning topics, scenario activities, a poll, a knowledge check, and slide/page references. The AI service must be configured for this Supabase project.
                       </p>
-                      <button type="button" className={`${primaryButton} mt-5`} onClick={createOutline}>
-                        <Sparkles className="h-4 w-4" /> Create metadata-only outline
-                      </button>
+                      <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={aiDisclosureAccepted}
+                          onChange={(event) => setAiDisclosureAccepted(event.target.checked)}
+                        />
+                        <span>
+                          I confirm my organization allows this deck to be sent to Google Gemini for analysis. I have removed personal or sensitive employee data that should not be shared with the AI provider.
+                        </span>
+                      </label>
+                      <div className="mt-5 flex flex-wrap gap-2">
+                        <button type="button" className={primaryButton} onClick={() => void convertDeckWithAI()} disabled={busy || !aiDisclosureAccepted}>
+                          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          {busy ? "Analyzing source deck..." : "Generate interactive draft with AI"}
+                        </button>
+                        <button type="button" className={secondaryButton} onClick={createOutline} disabled={busy}>
+                          Create manual outline
+                        </button>
+                      </div>
+                      {busy && (
+                        <p role="status" className="mt-3 text-sm text-slate-600">
+                          Reading the source deck and generating draft learning activities. This can take up to a minute.
+                        </p>
+                      )}
+                      <p className="mt-3 text-xs leading-5 text-slate-500">
+                        PDF slide content is analyzed by Gemini. PPTX slide text is extracted locally in the Edge Function before analysis. Unsupported or unreadable content is reported instead of invented.
+                      </p>
                     </section>
                   ) : (
                     <>
@@ -1246,6 +1395,19 @@ export function InductionDashboard({
                                 <label className="text-sm font-medium text-slate-700">
                                   Learning content
                                   <textarea className={`${controlClass} min-h-24`} maxLength={5000} value={topic.summary} onChange={(event) => setModuleTopic(topicIndex, { summary: event.target.value })} />
+                                </label>
+                                <label className="text-sm font-medium text-slate-700">
+                                  Source pages or slides
+                                  <textarea
+                                    className={`${controlClass} min-h-20`}
+                                    maxLength={1000}
+                                    placeholder="For example: PDF page 4, PPTX slide 7"
+                                    value={topic.sourceReferences.join(", ")}
+                                    onChange={(event) => setModuleTopic(topicIndex, {
+                                      sourceReferences: event.target.value.split(",").map((reference) => reference.trim()).filter(Boolean),
+                                    })}
+                                  />
+                                  <span className="mt-1 block text-xs font-normal text-slate-500">AI citations are suggestions; verify against the source deck.</span>
                                 </label>
                                 <label className="text-sm font-medium text-slate-700 sm:col-span-2">
                                   Scenario or interactive activity
@@ -1590,6 +1752,11 @@ export function InductionDashboard({
                         <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Topic {index + 1}</p>
                         <h3 className="mt-1 text-lg font-semibold">{topic.title || "Untitled topic"}</h3>
                         <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{topic.summary || "Learning content has not been added."}</p>
+                        {topic.sourceReferences.length > 0 && (
+                          <p className="mt-2 text-xs text-slate-500">
+                            Source reference: {topic.sourceReferences.join(", ")} · verify against the original deck
+                          </p>
+                        )}
                         <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">{topic.activityPrompt || "Scenario activity pending."}</p>
                         <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-slate-600">
                           {topic.activityOptions.map((option, choiceIndex) => (
