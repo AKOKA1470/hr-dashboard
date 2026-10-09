@@ -43,10 +43,13 @@ table. Requests and decisions cannot be modified directly through the browser AP
 
 ## Employee induction
 
-The induction module requires the `20261008000000_employee_induction.sql` migration in
-addition to the HR leave migration. It creates the private `induction-decks` storage bucket,
-role-scoped module and progress tables, and guarded assignment, progress, and HRBP-answer
-functions. HR users must have the existing `hr_admin` role; learners must have an
+The induction module requires `20261008000000_employee_induction.sql`,
+`20261009000000_induction_conversion_statuses.sql`, and
+`20261009000100_induction_conversion_data.sql` in addition to the HR leave migration. These
+create the private `induction-decks` storage
+bucket, role-scoped module and progress tables, and guarded assignment, progress, and
+HRBP-answer functions. The existing `hr_admin` role provides the HRBP permission in this
+application; learners must have an
 `employee` profile and a matching, provisioned Supabase Auth email before a roster row can
 be assigned. The roster CSV requires `email` and `full_name` headers. Importing a roster
 never provisions an account or creates a profile.
@@ -56,28 +59,33 @@ never provisions an account or creates a profile.
 Deploy the authenticated Edge Function and set its Gemini key as a server-side secret:
 
 ```powershell
-supabase functions deploy convert-induction-deck
+supabase functions deploy convert-induction
 ```
 
-In the Supabase Dashboard, add `GEMINI_API_KEY` under the project's Edge Function secrets.
-Optionally add `GEMINI_MODEL` to select another supported Gemini model; the default is
-`gemini-2.5-flash`. Never add the key to `.env.local`, a `VITE_` variable, the browser
-bundle, or source control. The function verifies the signed-in HR administrator, reads the
-uploaded deck from private Supabase Storage, and calls Gemini from the server.
+Add `GEMINI_API_KEY` under the project's Edge Function secrets in the Supabase Dashboard,
+or set it with `supabase secrets set --env-file supabase/functions/.env`. For local Edge
+Function development, copy `supabase/functions/.env.example` to the ignored
+`supabase/functions/.env` and populate the secret there. Never add the key to a frontend
+environment variable, browser bundle, or source control. The function independently
+validates the signed-in user's JWT and HR role, binds the request to the module's private
+Storage file, and calls Gemini from the server.
 
-PDF files are sent to Gemini for document analysis. PPTX slide text is extracted in the Edge
-Function and sent for analysis; images and speaker notes in PPTX are not extracted. AI
-conversion supports PDF and PPTX files up to 20 MB. Legacy PPT files must be converted to
-PDF or PPTX first. The function requests deletion of temporary Gemini PDF uploads after
-conversion; if the provider does not confirm deletion, its service retention policy applies.
-If the function or secret is not deployed, the app reports that AI conversion is not
-configured; HR can still create a clearly labeled, filename-only manual outline.
-The HRBP must confirm the organization's data-sharing policy before each AI conversion;
-deck content is sent to Google's Gemini service for processing.
+The upload studio sends `moduleId`, `filePath`, `companyName`, and `extractedText` to the
+function after upload. PPTX slide text is extracted in the Edge Function when no extracted
+text is supplied; PDF files are sent to Gemini for document analysis. Images and speaker
+notes in PPTX are not extracted. AI conversion supports PDF and PPTX files up to 20 MB;
+legacy PPT files must be converted to PDF or PPTX first. Generated sections, lessons,
+scenarios, quizzes, and knowledge checks are validated and saved to the induction tables
+before the module reaches `review_required`. Failures are marked `generation_failed`.
+Temporary Gemini PDF uploads are deleted after conversion when possible; if the provider
+does not confirm deletion, its service retention policy applies. The HRBP must confirm the
+organization's data-sharing policy before each AI conversion; deck content is sent to
+Google's Gemini service for processing.
 
-AI output is saved as an editable draft and includes suggested source page/slide references.
+AI output is saved as an editable module with suggested source page/slide references.
 These references and generated text can be incomplete or inaccurate: HR must verify all
-content against approved materials before review or publishing. Employee learning progress,
+content before publishing. Preview is limited to modules ready for review or already
+published, and publishing requires the `review_required` status. Employee learning progress,
 poll responses, assessment results, HRBP questions, and reports are stored under the database
 policies and functions introduced by the migration; the dashboard does not seed sample
 modules, employees, or analytics.
