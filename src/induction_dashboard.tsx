@@ -11,7 +11,6 @@ import {
   FileUp,
   GraduationCap,
   LoaderCircle,
-  LogOut,
   MessageCircle,
   Plus,
   RefreshCw,
@@ -97,11 +96,6 @@ const EMPTY_CONTENT: ModuleContent = {
   topics: [],
   poll: { prompt: "", options: ["", "", ""] },
   assessment: { question: "", options: ["", "", "", ""] },
-};
-const ROLE_LABELS: Record<AppRole, string> = {
-  hr_admin: "HRBP",
-  manager: "Manager",
-  employee: "Employee",
 };
 const STATUS_LABELS: Record<InductionModuleStatus, string> = {
   draft: "Draft",
@@ -340,15 +334,11 @@ function Badge({ children }: { children: string }) {
 
 export function InductionDashboard({
   profile,
-  email,
   userId,
-  onSignOut,
   onNavigateLeave,
 }: {
   profile: Profile;
-  email: string;
   userId: string;
-  onSignOut: () => void;
   onNavigateLeave: () => void;
 }) {
   const isHrbp = profile.role === "hr_admin";
@@ -1052,44 +1042,6 @@ export function InductionDashboard({
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-blue-600 p-2.5 text-white">
-              <BookOpenCheck className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-lg font-semibold tracking-tight">People Pulse</p>
-              <p className="text-xs text-slate-500">Employee induction</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="text-right">
-              <p className="text-sm font-medium text-slate-800">{profile.full_name}</p>
-              <p className="text-xs text-slate-500">{ROLE_LABELS[profile.role]} · {email}</p>
-            </div>
-            {isHrbp && previewableModules.length > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedModuleId(previewableModules[0].id);
-                  navigateTab("preview");
-                }}
-                className={secondaryButton}
-              >
-                <GraduationCap className="h-4 w-4" /> Learner preview
-              </button>
-            )}
-            <button type="button" onClick={handleLeaveNavigation} className={secondaryButton}>
-              <ArrowLeft className="h-4 w-4" /> Leave
-            </button>
-            <button type="button" onClick={onSignOut} className={secondaryButton}>
-              <LogOut className="h-4 w-4" /> Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
       <main className="mx-auto max-w-7xl px-5 py-6">
         <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end">
           <div>

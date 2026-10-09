@@ -108,6 +108,16 @@ trusted HR import flow; no employee is imported or invited by this migration.
 The current permission checks continue to use `public.profiles.role`; the directory's role
 catalog and assignment tables are not yet a replacement for those authorization checks.
 
+The authenticated People Pulse workspace includes an overview, a searchable employee
+directory, leave management, and employee induction. The directory is read-only: it queries
+only browser-granted employee fields, and PostgreSQL row-level security controls which
+profiles each account can see. HR administrators can read organization profiles; employees
+can read their own profile; managers can read profiles that report directly to them. Search
+and department/status filters apply only to those returned records. Overview counts are
+explicitly scoped to the signed-in account's authorized directory view, not represented as
+organization-wide totals for roles with restricted access. When no employee profile is
+available, the directory shows an empty state instead of sample people.
+
 The dashboard preview contains no fabricated employee records, leave requests, or metrics.
 With no Supabase configuration, the app will not pretend that the preview is connected to
 live employee data.
