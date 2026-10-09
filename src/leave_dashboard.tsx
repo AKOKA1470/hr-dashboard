@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   ArrowUpRight,
-  BriefcaseBusiness,
   Check,
   Clock3,
-  GraduationCap,
   LoaderCircle,
-  LogOut,
   X,
 } from "lucide-react";
 import type { AppRole, LeaveStatus, LeaveType } from "./lib/database.types";
@@ -28,11 +25,6 @@ type LeaveRequest = {
 type Employee = { id: string; full_name: string };
 type Department = { id: string; name: string };
 
-const roleLabels: Record<AppRole, string> = {
-  hr_admin: "HR administrator",
-  manager: "Manager",
-  employee: "Employee",
-};
 const leaveLabels: Record<LeaveType, string> = {
   earned: "Earned leave",
   sick: "Sick leave",
@@ -52,16 +44,8 @@ function formatDate(date: string) {
   });
 }
 
-export function LeaveDashboard({
-  profile,
-  email,
-  onSignOut,
-  onNavigateInduction,
-}: {
+export function LeaveDashboard({ profile }: {
   profile: Profile;
-  email: string;
-  onSignOut: () => void;
-  onNavigateInduction: () => void;
 }) {
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<Record<string, string>>({});
@@ -198,45 +182,6 @@ export function LeaveDashboard({
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-5">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-blue-600 p-2.5 text-white">
-              <BriefcaseBusiness className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight">People Pulse</h1>
-              <p className="text-xs text-slate-500">Live leave management</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="text-right">
-              <p className="text-sm font-medium text-slate-800">{profile.full_name}</p>
-              <p className="text-xs text-slate-500">
-                {roleLabels[profile.role]} · {email}
-              </p>
-            </div>
-            {profile.role !== "manager" && (
-              <button
-                type="button"
-                onClick={onNavigateInduction}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
-              >
-                <GraduationCap className="h-4 w-4" />
-                Induction
-              </button>
-            )}
-            <button
-              onClick={onSignOut}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium hover:bg-slate-50"
-            >
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
       <main className="mx-auto max-w-6xl space-y-6 px-5 py-7">
         <section className="rounded-2xl border border-blue-100 bg-blue-50/70 p-5">
           <h2 className="font-semibold text-slate-900">

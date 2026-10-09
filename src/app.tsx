@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ArrowLeft, BriefcaseBusiness, LoaderCircle, LockKeyhole } from "lucide-react";
 import HRDashboard from "./hr_dashboard";
+import { EmployeeDirectory } from "./employee_directory";
+import { HrmsShell, type HrmsArea } from "./hrms_shell";
 import { InductionDashboard } from "./induction_dashboard";
 import { LeaveDashboard } from "./leave_dashboard";
+import { OverviewDashboard } from "./overview_dashboard";
 import type { AppRole } from "./lib/database.types";
 import { supabase, supabaseConfiguration } from "./lib/supabase";
 
@@ -161,7 +164,7 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [showDemo, setShowDemo] = useState(false);
-  const [activeArea, setActiveArea] = useState<"leave" | "induction">("leave");
+  const [activeArea, setActiveArea] = useState<HrmsArea>("overview");
 
   useEffect(() => {
     if (!supabase) return;
@@ -283,20 +286,37 @@ export default function App() {
     );
   }
 
-  return activeArea === "induction" ? (
-    <InductionDashboard
-      profile={profile}
+  const currentArea =
+    profile.role === "manager" && activeArea === "induction" ? "leave" : activeArea;
+  const page =
+    currentArea === "overview" ? (
+      <OverviewDashboard
+        fullName={profile.full_name}
+        role={profile.role}
+        onNavigate={setActiveArea}
+      />
+    ) : currentArea === "people" ? (
+      <EmployeeDirectory role={profile.role} />
+    ) : currentArea === "induction" ? (
+      <InductionDashboard
+        profile={profile}
+        userId={session.user.id}
+        onNavigateLeave={() => setActiveArea("leave")}
+      />
+    ) : (
+      <LeaveDashboard profile={profile} />
+    );
+
+  return (
+    <HrmsShell
+      activeArea={currentArea}
       email={session.user.email ?? ""}
-      userId={session.user.id}
+      fullName={profile.full_name}
+      onNavigate={setActiveArea}
       onSignOut={signOut}
-      onNavigateLeave={() => setActiveArea("leave")}
-    />
-  ) : (
-    <LeaveDashboard
-      profile={profile}
-      email={session.user.email ?? ""}
-      onSignOut={signOut}
-      onNavigateInduction={() => setActiveArea("induction")}
-    />
+      role={profile.role}
+    >
+      {page}
+    </HrmsShell>
   );
 }
